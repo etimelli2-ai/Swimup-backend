@@ -24,16 +24,18 @@ app.use('/api/stripe',    require('./routes/stripe'));
 app.get('/api/health', (_, res) => res.json({ status: 'ok', time: new Date() }));
 
 // Debug connexion Stripe
-app.get('/api/debug-stripe2', async (req, res) => {
+app.get('/api/debug-stripe', async (req, res) => {
   try {
-    const https = require('https');
-    https.get('https://api.stripe.com', (r) => {
-      res.json({ success: true, status: r.statusCode });
-    }).on('error', (e) => {
-      res.json({ success: false, error: e.message, code: e.code });
+    const axios = require('axios');
+    const r = await axios.get('https://api.stripe.com/v1/balance', {
+      headers: {
+        'Authorization': `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+      },
+      timeout: 30000,
     });
+    res.json({ success: true, data: r.data });
   } catch (e) {
-    res.json({ error: e.message });
+    res.json({ success: false, error: e.message, status: e.response?.status, data: e.response?.data });
   }
 });
 

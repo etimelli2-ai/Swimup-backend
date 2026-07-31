@@ -22,7 +22,18 @@ app.use('/api/loterie',   require('./routes/loterie'));
 app.use('/api/stripe',    require('./routes/stripe'));
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', time: new Date() }));
-
+app.get('/api/debug-stripe', async (req, res) => {
+  try {
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: '2023-10-16',
+      timeout: 30000,
+    });
+    const balance = await stripe.balance.retrieve();
+    res.json({ success: true, currency: balance.available[0]?.currency });
+  } catch (e) {
+    res.json({ success: false, error: e.message, type: e.type });
+  }
+});
 // Migration 6 — table commandes Stripe
 app.get('/api/migrate6', async (req, res) => {
   try {

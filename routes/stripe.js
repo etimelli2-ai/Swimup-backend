@@ -1,4 +1,7 @@
-const express = require('express');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2023-10-16',
+  timeout: 30000,
+});
 const { db } = require('../db');
 const { authMiddleware, clientOnly } = require('../middleware/auth');
 

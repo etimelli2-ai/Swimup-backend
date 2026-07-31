@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { db } = require('../db');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
-const { schemas, validate, logger } = require('../middleware/security');
+const { validate, schemas, logger } = require('../middleware/security');
 
 const router = express.Router();
 
@@ -100,7 +100,7 @@ router.post('/login', validate(schemas.login), async (req, res) => {
     }
 
     if (user.banned) {
-      return res.status(403).json({ error: '🚫 Ton compte a été suspendu. Contacte l'admin.' });
+      return res.status(403).json({ error: "Ton compte a été suspendu. Contacte l'admin." });
     }
 
     const valid = await bcrypt.compare(password, user.password_hash);

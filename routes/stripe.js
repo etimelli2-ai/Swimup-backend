@@ -1,10 +1,16 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, {
+const express = require('express');
+const { db } = require('../db');
+const { authMiddleware, clientOnly } = require('../middleware/auth');
+
+const router = express.Router();
+
+const Stripe = require('stripe');
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2023-10-16',
   timeout: 60000,
   maxNetworkRetries: 0,
-  host: 'api.stripe.com',
-  protocol: 'https',
 });
+
 const PRIX_AVIS = 3.00;
 
 // POST /api/stripe/create-checkout-session

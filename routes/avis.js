@@ -1,5 +1,5 @@
 // ============================================================
-// 📁 backend/routes/avis.js — MODIFIÉ (Zod + sécurité)
+// backend/routes/avis.js -- MODIFIE (Zod + securite)
 // ============================================================
 
 const express = require('express');
@@ -48,13 +48,12 @@ router.post('/:id/reserver', authMiddleware, async (req, res) => {
   try {
     const avisId = req.params.id;
 
-    // Vérifier si l'utilisateur a déjà un avis en cours
     const existing = await db.execute({
       sql: "SELECT id FROM avis WHERE reserve_par = ? AND statut IN ('reserve', 'en_verification')",
       args: [req.user.id],
     });
     if (existing.rows.length) {
-      return res.status(400).json({ error: 'Tu as déjà un avis en cours' });
+      return res.status(400).json({ error: 'Tu as deja un avis en cours' });
     }
 
     const avis = await db.execute({
@@ -87,7 +86,7 @@ router.post('/:id/soumettre', authMiddleware, validate(schemas.avisSoumettre), a
     });
     const avis = avisRes.rows[0];
     if (!avis) {
-      return res.status(404).json({ error: 'Avis introuvable ou délai expiré' });
+      return res.status(404).json({ error: 'Avis introuvable ou delai expire' });
     }
 
     const reserveAt = new Date(avis.reserve_at);
@@ -96,7 +95,7 @@ router.post('/:id/soumettre', authMiddleware, validate(schemas.avisSoumettre), a
         sql: "UPDATE avis SET statut = 'disponible', reserve_par = NULL, reserve_at = NULL WHERE id = ?",
         args: [avisId]
       });
-      return res.status(400).json({ error: "Délai d'1h dépassé, l'avis est de nouveau disponible" });
+      return res.status(400).json({ error: "Delai d'1h depasse, l'avis est de nouveau disponible" });
     }
 
     await db.execute({
@@ -112,7 +111,7 @@ router.post('/:id/soumettre', authMiddleware, validate(schemas.avisSoumettre), a
     res.json({
       success: true,
       status: 'valide',
-      message: 'Avis soumis et validé ! Ton solde sera crédité après le délai.',
+      message: "Avis soumis et valide ! Ton solde sera credite apres le delai.",
     });
   } catch (e) {
     console.error(e);
@@ -142,7 +141,7 @@ router.post('/:id/contester', authMiddleware, validate(schemas.contestation), as
       args: [avisId, req.user.id],
     });
     if (!avisRes.rows[0]) {
-      return res.status(404).json({ error: 'Avis introuvable ou non refusé' });
+      return res.status(404).json({ error: 'Avis introuvable ou non refuse' });
     }
 
     const totalRefuses = await db.execute({
@@ -166,7 +165,7 @@ router.post('/:id/contester', authMiddleware, validate(schemas.contestation), as
       args: [avisId],
     });
     if (existing.rows[0]) {
-      return res.status(400).json({ error: 'Tu as déjà contesté cet avis' });
+      return res.status(400).json({ error: 'Tu as deja conteste cet avis' });
     }
 
     await db.execute({
@@ -189,7 +188,7 @@ router.post('/:id/contester', authMiddleware, validate(schemas.contestation), as
       });
     }
 
-    res.json({ success: true, message: 'Contestation envoyée à l'admin !' });
+    res.json({ success: true, message: "Contestation envoyee a l'admin !" });
   } catch (e) {
     res.status(500).json({ error: 'Erreur serveur' });
   }

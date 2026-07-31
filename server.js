@@ -22,38 +22,34 @@ app.use('/api/loterie',   require('./routes/loterie'));
 app.use('/api/stripe',    require('./routes/stripe'));
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', time: new Date() }));
+
+// Debug connexion Stripe
+app.get('/api/debug-stripe2', async (req, res) => {
+  try {
+    const https = require('https');
+    https.get('https://api.stripe.com', (r) => {
+      res.json({ success: true, status: r.statusCode });
+    }).on('error', (e) => {
+      res.json({ success: false, error: e.message, code: e.code });
+    });
+  } catch (e) {
+    res.json({ error: e.message });
+  }
+});
+
+// Debug Stripe API
 app.get('/api/debug-stripe', async (req, res) => {
   try {
-    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, {
+    const Stripe = require('stripe');
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
       apiVersion: '2023-10-16',
-      timeout: 30000,
+      timeout: 60000,
+      maxNetworkRetries: 0,
     });
     const balance = await stripe.balance.retrieve();
     res.json({ success: true, currency: balance.available[0]?.currency });
   } catch (e) {
     res.json({ success: false, error: e.message, type: e.type });
-  }
-});
-// Migration 6 — table commandes Stripe
-app.get('/api/migrate6', async (req, res) => {
-  try {
-    await db.executeMultiple(`
-      CREATE TABLE IF NOT EXISTS commandes (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        client_id         INTEGER NOT NULL,
-        stripe_session_id TEXT UNIQUE,
-        montant           REAL NOT NULL,
-        nb_avis           INTEGER NOT NULL,
-        statut            TEXT DEFAULT 'en_attente',
-        created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
-        paye_at           DATETIME,
-        FOREIGN KEY (client_id) REFERENCES clients(id)
-      );
-      ALTER TABLE avis ADD COLUMN commande_id INTEGER;
-    `);
-    res.json({ success: true, message: 'Migration 6 OK' });
-  } catch (e) {
-    res.json({ success: false, message: e.message });
   }
 });
 

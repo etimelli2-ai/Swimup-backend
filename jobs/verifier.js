@@ -165,7 +165,7 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
 
     console.log(`📊 Meilleur score : ${(meilleurScore * 100).toFixed(0)}%`)
 
-    if (meilleurScore >= 0.3) {
+    if (meilleurScore >= 0.2) {
       if (nbEtoilesAttendu && meilleurAvis?.review_rating) {
         if (parseInt(meilleurAvis.review_rating) !== parseInt(nbEtoilesAttendu)) {
           return {

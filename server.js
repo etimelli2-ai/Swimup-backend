@@ -20,38 +20,21 @@ app.use('/api/admin',     require('./routes/admin'));
 app.use('/api/client',    require('./routes/client'));
 app.use('/api/loterie',   require('./routes/loterie'));
 app.use('/api/stripe',    require('./routes/stripe'));
+app.use('/api/public',    require('./routes/public'));
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', time: new Date() }));
 
 // Debug connexion Stripe
-app.get('/api/debug-stripe', async (req, res) => {
+app.get('/api/debug-stripe2', async (req, res) => {
   try {
-    const axios = require('axios');
-    const r = await axios.get('https://api.stripe.com/v1/balance', {
-      headers: {
-        'Authorization': `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-      },
-      timeout: 30000,
+    const https = require('https');
+    https.get('https://api.stripe.com', (r) => {
+      res.json({ success: true, status: r.statusCode });
+    }).on('error', (e) => {
+      res.json({ success: false, error: e.message, code: e.code });
     });
-    res.json({ success: true, data: r.data });
   } catch (e) {
-    res.json({ success: false, error: e.message, status: e.response?.status, data: e.response?.data });
-  }
-});
-
-// Debug Stripe API
-app.get('/api/debug-stripe', async (req, res) => {
-  try {
-    const Stripe = require('stripe');
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: '2023-10-16',
-      timeout: 60000,
-      maxNetworkRetries: 0,
-    });
-    const balance = await stripe.balance.retrieve();
-    res.json({ success: true, currency: balance.available[0]?.currency });
-  } catch (e) {
-    res.json({ success: false, error: e.message, type: e.type });
+    res.json({ error: e.message });
   }
 });
 
@@ -62,18 +45,6 @@ app.post('/api/admin/run-verif', authMiddleware, adminOnly, async (req, res) => 
     jobVerificationQuotidienne();
   } catch (e) {
     res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/api/migrate7', async (req, res) => {
-  try {
-    await db.executeMultiple(`
-      ALTER TABLE avis ADD COLUMN prioritaire INTEGER DEFAULT 0;
-      ALTER TABLE avis ADD COLUMN prix_membre REAL DEFAULT 1.00;
-    `);
-    res.json({ success: true, message: 'Migration 7 OK' });
-  } catch (e) {
-    res.json({ success: false, message: e.message });
   }
 });
 

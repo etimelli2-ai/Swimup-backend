@@ -14,12 +14,13 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const result = await db.execute({
       sql: `SELECT a.id, a.lien_maps, a.texte, a.prix, a.delai_paiement, a.statut,
-            a.reserve_par, a.reserve_at, a.nb_etoiles,
-            COALESCE(a.nom_etablissement, c.nom_societe) as nom_societe
+              a.reserve_par, a.reserve_at, a.nb_etoiles,
+              a.prioritaire, a.prix_membre,
+              COALESCE(a.nom_etablissement, c.nom_societe) as nom_societe
             FROM avis a
             JOIN clients c ON a.client_id = c.id
             WHERE a.statut = 'disponible'
-            ORDER BY a.created_at DESC`,
+            ORDER BY a.prioritaire DESC, a.created_at DESC`,
       args: [],
     });
     res.json(result.rows);

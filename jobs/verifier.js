@@ -42,10 +42,9 @@ async function resoudreLienCourt(lien) {
   })
 }
 
-// Extraire la meilleure query pour Outscraper depuis n'importe quel lien Google Maps
+// Extraire la meilleure query pour Outscraper
 function extraireQueryPourOutscraper(url) {
   try {
-    // Cas 1 — /place/NomLieu/ (format classique)
     const placeMatch = url.match(/\/place\/([^/@?&]+)/)
     if (placeMatch) {
       const nom = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '))
@@ -53,25 +52,20 @@ function extraireQueryPourOutscraper(url) {
       return nom
     }
 
-    // Cas 2 — ?q=NomEtablissement,Adresse,Ville (format GPS)
     const qMatch = url.match(/[?&]q=([^&]+)/)
     if (qMatch) {
       const q = decodeURIComponent(qMatch[1].replace(/\+/g, ' '))
-      // Garder nom + ville seulement
       const parts = q.split(',')
       if (parts.length >= 2) {
         const nom = parts[0].trim()
-        const ville = parts[parts.length - 1].trim().replace(/\d{5}\s*/, '') // retirer code postal
+        const ville = parts[parts.length - 1].trim().replace(/\d{5}\s*/, '')
         const query = `${nom}, ${ville}`
         console.log(`📍 Extrait depuis ?q=: ${query}`)
         return query
       }
-      console.log(`📍 Extrait depuis ?q= (simple): ${q}`)
       return q
     }
 
-    // Cas 3 — URL complète comme fallback
-    console.log(`📍 Fallback URL complète`)
     return url
   } catch {
     return url
@@ -108,10 +102,7 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
       return { trouve: false, erreur: true, raison: 'API non configurée' }
     }
 
-    // Étape 1 — résoudre les liens courts
     const lienResolu = await resoudreLienCourt(lienMaps)
-
-    // Étape 2 — extraire la meilleure query pour Outscraper
     const query = extraireQueryPourOutscraper(lienResolu)
     console.log(`📍 Query finale Outscraper: ${query}`)
 
@@ -165,7 +156,7 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
 
     console.log(`📊 Meilleur score : ${(meilleurScore * 100).toFixed(0)}%`)
 
-    if (meilleurScore >= 0.2) {
+    if (meilleurScore >= 0.75) {
       if (nbEtoilesAttendu && meilleurAvis?.review_rating) {
         if (parseInt(meilleurAvis.review_rating) !== parseInt(nbEtoilesAttendu)) {
           return {
@@ -212,7 +203,7 @@ async function jobVerificationQuotidienne() {
   try {
     const verifRes = await db.execute({
       sql: `SELECT v.*, a.lien_maps, a.lien_avis_poste, a.texte, a.nb_etoiles,
-              a.prix, a.client_id, a.valide_at, a.delai_paiement
+              a.prix, a.client_id, a.valide_at, a.reserve_at, a.delai_paiement
             FROM verifications v
             JOIN avis a ON v.avis_id = a.id
             WHERE v.statut = 'actif' AND a.statut = 'valide'`,
@@ -280,8 +271,11 @@ async function jobVerificationQuotidienne() {
 
         console.log(`✅ Avis #${verif.avis_id} trouvé : ${result.raison}`)
 
-        const valideAt = new Date(verif.valide_at)
-        const joursEcoules = (Date.now() - valideAt.getTime()) / (1000 * 60 * 60 * 24)
+        // Fix — utiliser reserve_at au lieu de valide_at pour calculer les 30 jours
+        const dateRef = verif.reserve_at ? new Date(verif.reserve_at) : new Date(verif.valide_at)
+        const joursEcoules = (Date.now() - dateRef.getTime()) / (1000 * 60 * 60 * 24)
+
+        console.log(`📅 Jours écoulés depuis réservation : ${joursEcoules.toFixed(1)}j / ${verif.delai_paiement}j requis`)
 
         if (joursEcoules >= verif.delai_paiement) {
           const dejaCredite = await db.execute({
@@ -318,6 +312,7 @@ async function jobVerificationQuotidienne() {
       }
     }
 
+    // Libérer les réservations expirées
     await db.execute({
       sql: `UPDATE avis SET statut = 'disponible', reserve_par = NULL, reserve_at = NULL
             WHERE statut = 'reserve' AND reserve_at <= datetime('now', '-1 hour', 'utc')`,

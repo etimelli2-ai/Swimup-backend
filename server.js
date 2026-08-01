@@ -65,6 +65,18 @@ app.post('/api/admin/run-verif', authMiddleware, adminOnly, async (req, res) => 
   }
 });
 
+app.get('/api/migrate7', async (req, res) => {
+  try {
+    await db.executeMultiple(`
+      ALTER TABLE avis ADD COLUMN prioritaire INTEGER DEFAULT 0;
+      ALTER TABLE avis ADD COLUMN prix_membre REAL DEFAULT 1.00;
+    `);
+    res.json({ success: true, message: 'Migration 7 OK' });
+  } catch (e) {
+    res.json({ success: false, message: e.message });
+  }
+});
+
 cron.schedule('0 8 * * *', jobVerificationQuotidienne, { timezone: 'Europe/Paris' });
 
 const PORT = process.env.PORT || 3001;

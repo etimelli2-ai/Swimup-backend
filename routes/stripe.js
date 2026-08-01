@@ -7,6 +7,7 @@ const { authMiddleware, clientOnly } = require('../middleware/auth');
 const router = express.Router();
 
 const PRIX_AVIS = 3.00;
+const PRIX_PUBLIC = 4.00;
 const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
 const STRIPE_API = 'https://api.stripe.com/v1';
 
@@ -15,7 +16,6 @@ const stripeHeaders = {
   'Content-Type': 'application/x-www-form-urlencoded',
 };
 
-// Helper — convertir objet en form-urlencoded
 function toFormData(obj, prefix = '') {
   const parts = []
   for (const [key, val] of Object.entries(obj)) {
@@ -43,31 +43,81 @@ function buildFormData(obj) {
   return toFormData(obj).join('&')
 }
 
-// Vérifier la signature webhook Stripe manuellement
 function verifyStripeWebhook(payload, sig, secret) {
   const parts = sig.split(',')
   const timestamp = parts.find(p => p.startsWith('t=')).split('=')[1]
   const signatures = parts.filter(p => p.startsWith('v1=')).map(p => p.split('=')[1])
-
   const signedPayload = `${timestamp}.${payload}`
-  const expectedSig = crypto
-    .createHmac('sha256', secret)
-    .update(signedPayload)
-    .digest('hex')
-
-  const tolerance = 300 // 5 minutes
+  const expectedSig = crypto.createHmac('sha256', secret).update(signedPayload).digest('hex')
+  const tolerance = 300
   if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > tolerance) {
     throw new Error('Webhook timestamp trop ancien')
   }
-
   if (!signatures.includes(expectedSig)) {
     throw new Error('Signature webhook invalide')
   }
-
   return true
 }
 
-// POST /api/stripe/create-checkout-session
+// POST /api/stripe/public-checkout — SANS auth
+router.post('/public-checkout', async (req, res) => {
+  try {
+    const { email, lien_maps, nom_etablissement, type_etablissement, texte_avis, nb_etoiles, ton } = req.body;
+
+    if (!email || !lien_maps) return res.status(400).json({ error: 'Email et lien Maps requis' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Email invalide' });
+
+    const token = crypto.randomUUID();
+
+    const sessionData = buildFormData({
+      payment_method_types: ['card'],
+      mode: 'payment',
+      success_url: `${process.env.FRONTEND_URL}/suivi?token=${token}&success=1`,
+      cancel_url: `${process.env.FRONTEND_URL}/commander?cancel=1`,
+      'customer_email': email,
+      'line_items[0][price_data][currency]': 'eur',
+      'line_items[0][price_data][unit_amount]': Math.round(PRIX_PUBLIC * 100),
+      'line_items[0][price_data][product_data][name]': `1 avis Google Maps — SwimUp`,
+      'line_items[0][price_data][product_data][description]': `Pour ${nom_etablissement || 'votre établissement'}`,
+      'line_items[0][quantity]': 1,
+      'metadata[order_type]': 'public',
+      'metadata[public_token]': token,
+      'metadata[email]': email,
+      'metadata[lien_maps]': lien_maps,
+      'metadata[nom_etablissement]': nom_etablissement || '',
+      'metadata[type_etablissement]': type_etablissement || '',
+      'metadata[texte_avis]': texte_avis || '',
+      'metadata[nb_etoiles]': String(nb_etoiles || 5),
+      'metadata[ton]': ton || 'naturel',
+    });
+
+    const response = await axios.post(`${STRIPE_API}/checkout/sessions`, sessionData, {
+      headers: stripeHeaders,
+      timeout: 30000,
+    });
+
+    const session = response.data;
+
+    await db.execute({
+      sql: `INSERT INTO public_orders
+              (email, token_suivi, stripe_session_id, montant, nb_avis, lien_maps,
+               nom_etablissement, type_etablissement, texte_avis, nb_etoiles, ton)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        email, token, session.id, PRIX_PUBLIC, 1, lien_maps,
+        nom_etablissement || null, type_etablissement || null,
+        texte_avis || null, nb_etoiles || 5, ton || 'naturel',
+      ],
+    });
+
+    res.json({ url: session.url, token });
+  } catch (e) {
+    console.error('Stripe public error:', e.response?.data || e.message);
+    res.status(500).json({ error: e.response?.data?.error?.message || e.message });
+  }
+});
+
+// POST /api/stripe/create-checkout-session — clients avec compte
 router.post('/create-checkout-session', authMiddleware, clientOnly, async (req, res) => {
   try {
     const { nb_avis, nom_etablissement, lien_maps, type_etablissement, delai_paiement, nb_etoiles } = req.body;
@@ -94,6 +144,7 @@ router.post('/create-checkout-session', authMiddleware, clientOnly, async (req, 
       'line_items[0][price_data][product_data][name]': `${nb_avis} avis Google — ${nom_etablissement || 'SwimUp'}`,
       'line_items[0][price_data][product_data][description]': `Commande pour ${nom_etablissement || 'votre établissement'}`,
       'line_items[0][quantity]': 1,
+      'metadata[order_type]': 'client',
       'metadata[client_id]': String(client.id),
       'metadata[user_id]': String(req.user.id),
       'metadata[nb_avis]': String(nb_avis),
@@ -143,44 +194,75 @@ router.post('/webhook', async (req, res) => {
     const session = event.data.object;
     const meta = session.metadata;
 
-    try {
-      const clientId      = parseInt(meta.client_id);
-      const userId        = parseInt(meta.user_id);
-      const nbAvis        = parseInt(meta.nb_avis);
-      const nomEtab       = meta.nom_etablissement;
-      const lienMaps      = meta.lien_maps;
-      const delaiPaiement = parseInt(meta.delai_paiement) || 30;
-      const nbEtoiles     = parseInt(meta.nb_etoiles) || 5;
-      const montant       = parseFloat(session.amount_total) / 100;
-
-      await db.execute({
-        sql: `UPDATE commandes SET statut = 'paye', paye_at = CURRENT_TIMESTAMP
-              WHERE stripe_session_id = ?`,
-        args: [session.id],
-      });
-
-      const commandeRes = await db.execute({
-        sql: 'SELECT id FROM commandes WHERE stripe_session_id = ?',
-        args: [session.id],
-      });
-      const commandeId = commandeRes.rows[0]?.id;
-
-      for (let i = 0; i < nbAvis; i++) {
+    // Commande publique
+    if (meta.order_type === 'public') {
+      try {
         await db.execute({
-          sql: `INSERT INTO avis (client_id, lien_maps, texte, prix, delai_paiement, nb_etoiles, nom_etablissement, commande_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          args: [clientId, lienMaps, '', 1.00, delaiPaiement, nbEtoiles, nomEtab, commandeId || null],
+          sql: `UPDATE public_orders SET statut = 'paye', paye_at = CURRENT_TIMESTAMP
+                WHERE stripe_session_id = ?`,
+          args: [session.id],
         });
+
+        const orderRes = await db.execute({
+          sql: 'SELECT id FROM public_orders WHERE stripe_session_id = ?',
+          args: [session.id],
+        });
+        const orderId = orderRes.rows[0]?.id;
+
+        await db.execute({
+          sql: 'INSERT INTO avis_publics (public_order_id) VALUES (?)',
+          args: [orderId],
+        });
+
+        console.log(`✅ Commande publique payée — token: ${meta.public_token}, email: ${meta.email}`);
+      } catch (e) {
+        console.error('Erreur webhook public:', e.message);
       }
 
-      await db.execute({
-        sql: 'INSERT INTO notifications (user_id, titre, message) VALUES (?,?,?)',
-        args: [userId, '✅ Paiement reçu !', `Ton paiement de ${montant.toFixed(2)}€ a été reçu. Tu peux maintenant remplir les textes de tes ${nbAvis} avis.`],
-      });
+      return res.json({ received: true });
+    }
 
-      console.log(`✅ Paiement Stripe reçu — ${nbAvis} avis créés pour client #${clientId}`);
-    } catch (e) {
-      console.error('Erreur traitement webhook:', e.message);
+    // Commande client avec compte
+    if (meta.order_type === 'client') {
+      try {
+        const clientId      = parseInt(meta.client_id);
+        const userId        = parseInt(meta.user_id);
+        const nbAvis        = parseInt(meta.nb_avis);
+        const nomEtab       = meta.nom_etablissement;
+        const lienMaps      = meta.lien_maps;
+        const delaiPaiement = parseInt(meta.delai_paiement) || 30;
+        const nbEtoiles     = parseInt(meta.nb_etoiles) || 5;
+        const montant       = parseFloat(session.amount_total) / 100;
+
+        await db.execute({
+          sql: `UPDATE commandes SET statut = 'paye', paye_at = CURRENT_TIMESTAMP
+                WHERE stripe_session_id = ?`,
+          args: [session.id],
+        });
+
+        const commandeRes = await db.execute({
+          sql: 'SELECT id FROM commandes WHERE stripe_session_id = ?',
+          args: [session.id],
+        });
+        const commandeId = commandeRes.rows[0]?.id;
+
+        for (let i = 0; i < nbAvis; i++) {
+          await db.execute({
+            sql: `INSERT INTO avis (client_id, lien_maps, texte, prix, delai_paiement, nb_etoiles, nom_etablissement, commande_id)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [clientId, lienMaps, '', 1.00, delaiPaiement, nbEtoiles, nomEtab, commandeId || null],
+          });
+        }
+
+        await db.execute({
+          sql: 'INSERT INTO notifications (user_id, titre, message) VALUES (?,?,?)',
+          args: [userId, '✅ Paiement reçu !', `Ton paiement de ${montant.toFixed(2)}€ a été reçu. Tu peux maintenant remplir les textes de tes ${nbAvis} avis.`],
+        });
+
+        console.log(`✅ Paiement client reçu — ${nbAvis} avis créés pour client #${clientId}`);
+      } catch (e) {
+        console.error('Erreur webhook client:', e.message);
+      }
     }
   }
 

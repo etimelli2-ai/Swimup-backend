@@ -1,7 +1,3 @@
-// ============================================================
-// 📁 backend/db.js — MODIFIÉ (avec index)
-// ============================================================
-
 const { createClient } = require('@libsql/client');
 
 const db = createClient({
@@ -12,109 +8,111 @@ const db = createClient({
 async function initDB() {
   await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      discord_id TEXT,
-      paypal_email TEXT,
-      role TEXT DEFAULT 'membre' CHECK(role IN ('membre', 'client', 'admin')),
-      solde REAL DEFAULT 0,
-      ip_address TEXT,
-      last_login DATETIME,
-      banned INTEGER DEFAULT 0,
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      email           TEXT NOT NULL UNIQUE,
+      password_hash   TEXT NOT NULL,
+      discord_id      TEXT,
+      paypal_email    TEXT,
+      role            TEXT DEFAULT 'membre' CHECK(role IN ('membre', 'client', 'admin')),
+      solde           REAL DEFAULT 0,
+      ip_address      TEXT,
+      last_login      DATETIME,
+      banned          INTEGER DEFAULT 0,
       discord_demande INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS clients (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL UNIQUE,
-      nom_societe TEXT,
-      solde_depot REAL DEFAULT 0,
-      paiement_valide INTEGER DEFAULT 1,
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id          INTEGER NOT NULL UNIQUE,
+      nom_societe      TEXT,
+      solde_depot      REAL DEFAULT 0,
+      paiement_valide  INTEGER DEFAULT 1,
       bloquer_si_dette INTEGER DEFAULT 0,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
     CREATE TABLE IF NOT EXISTS avis (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      client_id INTEGER NOT NULL,
-      lien_maps TEXT NOT NULL,
-      texte TEXT NOT NULL,
-      prix REAL NOT NULL,
-      delai_paiement INTEGER NOT NULL DEFAULT 30,
-      nb_etoiles INTEGER DEFAULT 5,
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id         INTEGER NOT NULL,
+      lien_maps         TEXT NOT NULL,
+      texte             TEXT NOT NULL,
+      prix              REAL NOT NULL,
+      prix_membre       REAL DEFAULT 1.00,
+      prioritaire       INTEGER DEFAULT 0,
+      delai_paiement    INTEGER NOT NULL DEFAULT 30,
+      nb_etoiles        INTEGER DEFAULT 5,
       nom_etablissement TEXT,
-      statut TEXT DEFAULT 'disponible' CHECK(statut IN ('disponible','reserve','en_verification','valide','refuse','paye')),
-      reserve_par INTEGER,
-      reserve_at DATETIME,
-      soumis_at DATETIME,
-      lien_avis_poste TEXT,
-      place_id TEXT,
-      valide_at DATETIME,
-      paye_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      commande_id       INTEGER,
+      statut            TEXT DEFAULT 'disponible' CHECK(statut IN ('disponible','reserve','en_verification','valide','refuse','paye')),
+      reserve_par       INTEGER,
+      reserve_at        DATETIME,
+      soumis_at         DATETIME,
+      lien_avis_poste   TEXT,
+      valide_at         DATETIME,
+      paye_at           DATETIME,
+      created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (client_id) REFERENCES clients(id),
       FOREIGN KEY (reserve_par) REFERENCES users(id)
     );
 
     CREATE TABLE IF NOT EXISTS verifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      avis_id INTEGER NOT NULL UNIQUE,
-      user_id INTEGER NOT NULL,
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      avis_id    INTEGER NOT NULL UNIQUE,
+      user_id    INTEGER NOT NULL,
       last_check DATETIME DEFAULT CURRENT_TIMESTAMP,
-      nb_checks INTEGER DEFAULT 0,
-      statut TEXT DEFAULT 'actif',
+      nb_checks  INTEGER DEFAULT 0,
+      statut     TEXT DEFAULT 'actif',
       FOREIGN KEY (avis_id) REFERENCES avis(id),
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
     CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      type TEXT NOT NULL CHECK(type IN ('credit','debit','retrait','penalite')),
-      montant REAL NOT NULL,
-      note TEXT,
-      avis_id INTEGER,
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      type       TEXT NOT NULL CHECK(type IN ('credit','debit','retrait','penalite')),
+      montant    REAL NOT NULL,
+      note       TEXT,
+      avis_id    INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
     CREATE TABLE IF NOT EXISTS retraits (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      montant REAL NOT NULL,
-      paypal TEXT NOT NULL,
-      statut TEXT DEFAULT 'en_attente' CHECK(statut IN ('en_attente','paye','refuse')),
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      montant    REAL NOT NULL,
+      paypal     TEXT NOT NULL,
+      statut     TEXT DEFAULT 'en_attente' CHECK(statut IN ('en_attente','paye','refuse')),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
     CREATE TABLE IF NOT EXISTS invitations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      code TEXT NOT NULL UNIQUE,
-      role TEXT DEFAULT 'client',
-      utilise INTEGER DEFAULT 0,
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      code       TEXT NOT NULL UNIQUE,
+      role       TEXT DEFAULT 'client',
+      utilise    INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS loteries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      titre TEXT NOT NULL,
-      montant_gain REAL NOT NULL,
-      prix_ticket REAL DEFAULT 1,
-      statut TEXT DEFAULT 'en_cours' CHECK(statut IN ('en_cours','terminee')),
-      gagnant_id INTEGER,
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      titre         TEXT NOT NULL,
+      montant_gain  REAL NOT NULL,
+      prix_ticket   REAL DEFAULT 1,
+      statut        TEXT DEFAULT 'en_cours' CHECK(statut IN ('en_cours','terminee')),
+      gagnant_id    INTEGER,
       gagnant_email TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      termine_at DATETIME,
+      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+      termine_at    DATETIME,
       FOREIGN KEY (gagnant_id) REFERENCES users(id)
     );
 
     CREATE TABLE IF NOT EXISTS loterie_tickets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
       loterie_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
+      user_id    INTEGER NOT NULL,
       nb_tickets INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(loterie_id, user_id),
@@ -123,67 +121,76 @@ async function initDB() {
     );
 
     CREATE TABLE IF NOT EXISTS notifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      titre TEXT NOT NULL,
-      message TEXT NOT NULL,
-      lu INTEGER DEFAULT 0,
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      titre      TEXT NOT NULL,
+      message    TEXT NOT NULL,
+      lu         INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
     CREATE TABLE IF NOT EXISTS contestations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      avis_id INTEGER NOT NULL,
-      message TEXT,
-      statut TEXT DEFAULT 'en_attente',
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      avis_id    INTEGER NOT NULL,
+      message    TEXT,
+      statut     TEXT DEFAULT 'en_attente',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(avis_id),
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (avis_id) REFERENCES avis(id)
     );
 
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      action TEXT NOT NULL,
-      target_type TEXT,
-      target_id INTEGER,
-      details TEXT,
-      ip_address TEXT,
-      user_agent TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    CREATE TABLE IF NOT EXISTS commandes (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id         INTEGER NOT NULL,
+      stripe_session_id TEXT UNIQUE,
+      montant           REAL NOT NULL,
+      nb_avis           INTEGER NOT NULL,
+      statut            TEXT DEFAULT 'en_attente',
+      created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+      paye_at           DATETIME,
+      FOREIGN KEY (client_id) REFERENCES clients(id)
     );
+
+    CREATE TABLE IF NOT EXISTS public_orders (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      email              TEXT NOT NULL,
+      token_suivi        TEXT NOT NULL UNIQUE,
+      stripe_session_id  TEXT NOT NULL UNIQUE,
+      montant            REAL NOT NULL DEFAULT 4.00,
+      nb_avis            INTEGER NOT NULL DEFAULT 1,
+      lien_maps          TEXT NOT NULL,
+      nom_etablissement  TEXT,
+      type_etablissement TEXT,
+      texte_avis         TEXT,
+      nb_etoiles         INTEGER DEFAULT 5,
+      ton                TEXT DEFAULT 'naturel',
+      statut             TEXT DEFAULT 'en_attente',
+      paye_at            DATETIME,
+      created_at         DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS avis_publics (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_order_id INTEGER NOT NULL,
+      reserve_par     INTEGER,
+      reserve_at      DATETIME,
+      statut          TEXT DEFAULT 'disponible',
+      lien_avis_poste TEXT,
+      soumis_at       DATETIME,
+      valide_at       DATETIME,
+      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (public_order_id) REFERENCES public_orders(id),
+      FOREIGN KEY (reserve_par) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_public_orders_token  ON public_orders(token_suivi);
+    CREATE INDEX IF NOT EXISTS idx_public_orders_statut ON public_orders(statut);
+    CREATE INDEX IF NOT EXISTS idx_avis_publics_order   ON avis_publics(public_order_id);
+    CREATE INDEX IF NOT EXISTS idx_avis_publics_reserve ON avis_publics(reserve_par);
   `);
-
-  // ─── Index pour performance ───
-  const indexes = [
-    'CREATE INDEX IF NOT EXISTS idx_avis_statut ON avis(statut)',
-    'CREATE INDEX IF NOT EXISTS idx_avis_reserve_par ON avis(reserve_par)',
-    'CREATE INDEX IF NOT EXISTS idx_avis_client_id ON avis(client_id)',
-    'CREATE INDEX IF NOT EXISTS idx_avis_created_at ON avis(created_at)',
-    'CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id)',
-    'CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type)',
-    'CREATE INDEX IF NOT EXISTS idx_retraits_user_id ON retraits(user_id)',
-    'CREATE INDEX IF NOT EXISTS idx_retraits_statut ON retraits(statut)',
-    'CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)',
-    'CREATE INDEX IF NOT EXISTS idx_notifications_lu ON notifications(lu)',
-    'CREATE INDEX IF NOT EXISTS idx_verifications_avis_id ON verifications(avis_id)',
-    'CREATE INDEX IF NOT EXISTS idx_verifications_statut ON verifications(statut)',
-    'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
-    'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)',
-    'CREATE INDEX IF NOT EXISTS idx_users_ip ON users(ip_address)',
-    'CREATE INDEX IF NOT EXISTS idx_contestations_avis_id ON contestations(avis_id)',
-    'CREATE INDEX IF NOT EXISTS idx_loterie_tickets_loterie ON loterie_tickets(loterie_id)',
-    'CREATE INDEX IF NOT EXISTS idx_loterie_tickets_user ON loterie_tickets(user_id)',
-    'CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)',
-    'CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)',
-  ];
-
-  for (const sql of indexes) {
-    await db.execute(sql);
-  }
 
   console.log('✅ DB Swimup initialisée avec index');
 }

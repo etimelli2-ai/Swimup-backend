@@ -119,7 +119,7 @@ router.put('/users/:id/reset-password', async (req, res) => {
     await db.execute({ sql: 'UPDATE users SET password_hash = ? WHERE id = ?', args: [hash, req.params.id] });
     await db.execute({
       sql: 'INSERT INTO notifications (user_id, titre, message) VALUES (?,?,?)',
-      args: [req.params.id, '🔑 Mot de passe modifié', 'Ton mot de passe a été réinitialisé par l\'admin.'],
+      args: [req.params.id, '🔑 Mot de passe modifié', "Ton mot de passe a été réinitialisé par l'admin."],
     });
     res.json({ success: true });
   } catch (e) {
@@ -151,7 +151,7 @@ router.get('/avis', async (req, res) => {
             JOIN clients c ON a.client_id = c.id
             LEFT JOIN users u ON a.reserve_par = u.id
             LEFT JOIN verifications v ON v.avis_id = a.id
-            ORDER BY a.created_at DESC`,
+            ORDER BY a.prioritaire DESC, a.created_at DESC`,
       args: [],
     });
     res.json(result.rows);
@@ -297,7 +297,37 @@ router.put('/avis/:id/remettre-dispo', async (req, res) => {
   }
 });
 
-// POST /api/admin/avis/:id/verifier — corrigé
+// PUT /api/admin/avis/:id/prioritaire
+router.put('/avis/:id/prioritaire', async (req, res) => {
+  try {
+    const { prioritaire, prix_membre } = req.body;
+    const m = parseFloat(prix_membre);
+    if (isNaN(m) || m < 1) return res.status(400).json({ error: 'Prix minimum 1€' });
+
+    await db.execute({
+      sql: 'UPDATE avis SET prioritaire = ?, prix_membre = ? WHERE id = ?',
+      args: [prioritaire ? 1 : 0, m, req.params.id],
+    });
+
+    if (prioritaire) {
+      const membresRes = await db.execute({
+        sql: "SELECT id FROM users WHERE role = 'membre' AND banned = 0",
+        args: [],
+      });
+      for (const membre of membresRes.rows) {
+        await db.execute({
+          sql: 'INSERT INTO notifications (user_id, titre, message) VALUES (?,?,?)',
+          args: [membre.id, '🔥 Avis prioritaire disponible !', `Un avis prioritaire à ${m.toFixed(2)}€ est disponible ! Dépêche-toi de le réserver.`],
+        });
+      }
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 router.post('/avis/:id/verifier', async (req, res) => {
   try {
     const { verifierViaOutscraper } = require('../jobs/verifier');
@@ -307,7 +337,6 @@ router.post('/avis/:id/verifier', async (req, res) => {
 
     res.json({ success: true, message: '🔍 Vérification lancée ! Rafraîchis dans 1-2 minutes.' });
 
-    // Fix — seulement 3 arguments, plus de lienAvisPoste
     verifierViaOutscraper(avis.lien_maps, avis.texte, avis.nb_etoiles)
       .then(async (result) => {
         try {
@@ -327,7 +356,6 @@ router.post('/avis/:id/verifier', async (req, res) => {
             });
           }
 
-          // Fix — si erreur API on ne fait rien
           if (result.erreur) {
             console.log(`⚠️ Vérif manuelle avis #${avis.id} : erreur API — ${result.raison}`);
             return;
@@ -349,7 +377,6 @@ router.post('/avis/:id/verifier', async (req, res) => {
               });
             }
           } else {
-            // Fix — valider l'avis s'il est trouvé
             await db.execute({
               sql: "UPDATE avis SET statut = 'valide', valide_at = CURRENT_TIMESTAMP WHERE id = ? AND statut != 'paye'",
               args: [avis.id],
@@ -357,11 +384,10 @@ router.post('/avis/:id/verifier', async (req, res) => {
             if (avis.reserve_par) {
               await db.execute({
                 sql: 'INSERT INTO notifications (user_id, titre, message) VALUES (?,?,?)',
-                args: [avis.reserve_par, '✅ Avis validé !', "Ton avis a été vérifié et validé par l'admin."],
+                args: [avis.reserve_par, '✅ Avis vérifié !', "Ton avis a été vérifié et validé par l'admin."],
               });
             }
           }
-
           console.log(`✅ Vérif manuelle avis #${avis.id} : ${result.trouve ? 'trouvé' : 'non trouvé'} — ${result.raison}`)
         } catch (e) {
           console.error('Erreur post-vérif:', e.message)

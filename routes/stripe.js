@@ -62,12 +62,19 @@ function verifyStripeWebhook(payload, sig, secret) {
 // POST /api/stripe/public-checkout — SANS auth
 router.post('/public-checkout', async (req, res) => {
   try {
-    const { email, lien_maps, nom_etablissement, type_etablissement, texte_avis, nb_etoiles, ton } = req.body;
+    const {
+      email, lien_maps, nom_etablissement, type_etablissement,
+      texte_avis, nb_etoiles, ton, quantite
+    } = req.body;
 
     if (!email || !lien_maps) return res.status(400).json({ error: 'Email et lien Maps requis' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Email invalide' });
 
+    const nb = parseInt(quantite) || 1;
+    if (nb < 1) return res.status(400).json({ error: 'Minimum 1 avis' });
+
     const token = crypto.randomUUID();
+    const montant = nb * PRIX_PUBLIC;
 
     const sessionData = buildFormData({
       payment_method_types: ['card'],
@@ -76,9 +83,9 @@ router.post('/public-checkout', async (req, res) => {
       cancel_url: `${process.env.FRONTEND_URL}/commander?cancel=1`,
       'customer_email': email,
       'line_items[0][price_data][currency]': 'eur',
-      'line_items[0][price_data][unit_amount]': Math.round(PRIX_PUBLIC * 100),
-      'line_items[0][price_data][product_data][name]': `1 avis Google Maps — SwimUp`,
-      'line_items[0][price_data][product_data][description]': `Pour ${nom_etablissement || 'votre établissement'}`,
+      'line_items[0][price_data][unit_amount]': Math.round(montant * 100),
+      'line_items[0][price_data][product_data][name]': `${nb} avis Google Maps — SwimUp`,
+      'line_items[0][price_data][product_data][description]': `Pour ${nom_etablissement || 'votre établissement'} — Garantie 30 jours`,
       'line_items[0][quantity]': 1,
       'metadata[order_type]': 'public',
       'metadata[public_token]': token,
@@ -89,6 +96,7 @@ router.post('/public-checkout', async (req, res) => {
       'metadata[texte_avis]': texte_avis || '',
       'metadata[nb_etoiles]': String(nb_etoiles || 5),
       'metadata[ton]': ton || 'naturel',
+      'metadata[quantite]': String(nb),
     });
 
     const response = await axios.post(`${STRIPE_API}/checkout/sessions`, sessionData, {
@@ -104,7 +112,7 @@ router.post('/public-checkout', async (req, res) => {
                nom_etablissement, type_etablissement, texte_avis, nb_etoiles, ton)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        email, token, session.id, PRIX_PUBLIC, 1, lien_maps,
+        email, token, session.id, montant, nb, lien_maps,
         nom_etablissement || null, type_etablissement || null,
         texte_avis || null, nb_etoiles || 5, ton || 'naturel',
       ],
@@ -208,13 +216,17 @@ router.post('/webhook', async (req, res) => {
           args: [session.id],
         });
         const orderId = orderRes.rows[0]?.id;
+        const nbAvis = parseInt(meta.quantite) || 1;
 
-        await db.execute({
-          sql: 'INSERT INTO avis_publics (public_order_id) VALUES (?)',
-          args: [orderId],
-        });
+        // Créer autant d'avis publics que commandés
+        for (let i = 0; i < nbAvis; i++) {
+          await db.execute({
+            sql: 'INSERT INTO avis_publics (public_order_id) VALUES (?)',
+            args: [orderId],
+          });
+        }
 
-        console.log(`✅ Commande publique payée — token: ${meta.public_token}, email: ${meta.email}`);
+        console.log(`✅ Commande publique payée — token: ${meta.public_token}, email: ${meta.email}, nb: ${nbAvis}`);
       } catch (e) {
         console.error('Erreur webhook public:', e.message);
       }

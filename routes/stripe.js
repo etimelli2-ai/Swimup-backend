@@ -126,12 +126,45 @@ router.post('/public-checkout', async (req, res) => {
 });
 
 // POST /api/stripe/create-checkout-session — clients avec compte
-router.post('/create-checkout-session', authMiddleware, clientOnly, async (req, res) => {
+router.post('/create-checkout-session', authMiddleware, async (req, res) => {
   try {
     const { nb_avis, nom_etablissement, lien_maps, type_etablissement, delai_paiement, nb_etoiles } = req.body;
 
     if (!nb_avis || nb_avis < 1) return res.status(400).json({ error: 'Nombre d\'avis invalide' });
     if (!lien_maps) return res.status(400).json({ error: 'Lien Google Maps requis' });
+
+    // Admin — bypass Stripe, créer les avis directement
+    if (req.user.role === 'admin') {
+      const clientRes = await db.execute({
+        sql: 'SELECT id FROM clients WHERE user_id = ?',
+        args: [req.user.id],
+      });
+      const client = clientRes.rows[0];
+      if (!client) return res.status(404).json({ error: 'Profil client introuvable' });
+
+      const fakeSessionId = `admin_${Date.now()}`;
+      await db.execute({
+        sql: `INSERT INTO commandes (client_id, stripe_session_id, montant, nb_avis, statut, paye_at)
+              VALUES (?, ?, ?, ?, 'paye', CURRENT_TIMESTAMP)`,
+        args: [client.id, fakeSessionId, 0, nb_avis],
+      });
+
+      const commandeRes = await db.execute({
+        sql: 'SELECT id FROM commandes WHERE stripe_session_id = ?',
+        args: [fakeSessionId],
+      });
+      const commandeId = commandeRes.rows[0]?.id;
+
+      for (let i = 0; i < nb_avis; i++) {
+        await db.execute({
+          sql: `INSERT INTO avis (client_id, lien_maps, texte, prix, delai_paiement, nb_etoiles, nom_etablissement, commande_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [client.id, lien_maps, '', 1.00, parseInt(delai_paiement) || 30, parseInt(nb_etoiles) || 5, nom_etablissement, commandeId],
+        });
+      }
+
+      return res.json({ url: `${process.env.FRONTEND_URL}/client/success?session_id=${fakeSessionId}`, session_id: fakeSessionId });
+    }
 
     const clientRes = await db.execute({
       sql: 'SELECT id FROM clients WHERE user_id = ?',
@@ -139,7 +172,6 @@ router.post('/create-checkout-session', authMiddleware, clientOnly, async (req, 
     });
     const client = clientRes.rows[0];
     if (!client) return res.status(404).json({ error: 'Profil client introuvable' });
-
     const montant = nb_avis * PRIX_AVIS;
 
     const sessionData = buildFormData({

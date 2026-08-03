@@ -194,19 +194,49 @@ router.delete('/avis/menage', async (req, res) => {
   }
 });
 
-router.delete('/avis/:id', async (req, res) => {
+router.delete('/avis/menage', async (req, res) => {
   try {
-    const id = req.params.id;
-    await db.execute({ sql: 'DELETE FROM contestations WHERE avis_id = ?', args: [id] });
-    await db.execute({ sql: 'DELETE FROM verifications WHERE avis_id = ?', args: [id] });
-    await db.execute({ sql: 'DELETE FROM transactions WHERE avis_id = ?', args: [id] });
-    await db.execute({ sql: 'DELETE FROM avis WHERE id = ?', args: [id] });
-    res.json({ success: true });
+    // Remettre en disponible les avis refusés
+    const refusesRes = await db.execute({
+      sql: "SELECT id FROM avis WHERE statut = 'refuse'",
+      args: [],
+    });
+    let resetCount = 0;
+    for (const a of refusesRes.rows) {
+      await db.execute({
+        sql: `UPDATE avis SET statut = 'disponible', reserve_par = NULL, reserve_at = NULL,
+                soumis_at = NULL, lien_avis_poste = NULL, valide_at = NULL WHERE id = ?`,
+        args: [a.id],
+      });
+      await db.execute({
+        sql: "UPDATE verifications SET statut = 'actif', last_check = NULL, nb_checks = 0 WHERE avis_id = ?",
+        args: [a.id],
+      });
+      resetCount++;
+    }
+
+    // Supprimer les avis payés
+    const payesRes = await db.execute({
+      sql: "SELECT id FROM avis WHERE statut = 'paye'",
+      args: [],
+    });
+    let deleteCount = 0;
+    for (const a of payesRes.rows) {
+      await db.execute({ sql: 'DELETE FROM contestations WHERE avis_id = ?', args: [a.id] });
+      await db.execute({ sql: 'DELETE FROM verifications WHERE avis_id = ?', args: [a.id] });
+      await db.execute({ sql: 'DELETE FROM transactions WHERE avis_id = ?', args: [a.id] });
+      await db.execute({ sql: 'DELETE FROM avis WHERE id = ?', args: [a.id] });
+      deleteCount++;
+    }
+
+    res.json({
+      success: true,
+      message: `✅ ${resetCount} avis refusés remis en dispo · ${deleteCount} avis payés supprimés !`
+    });
   } catch (e) {
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
-
 router.put('/avis/:id', async (req, res) => {
   try {
     const { lien_maps, texte, prix, delai_paiement, statut } = req.body;

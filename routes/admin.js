@@ -174,29 +174,10 @@ router.post('/avis', async (req, res) => {
   }
 });
 
+// Fix — une seule route menage qui fait les deux actions
 router.delete('/avis/menage', async (req, res) => {
   try {
-    const avisRes = await db.execute({
-      sql: "SELECT id FROM avis WHERE statut IN ('refuse', 'paye')",
-      args: [],
-    });
-    let count = 0;
-    for (const a of avisRes.rows) {
-      await db.execute({ sql: 'DELETE FROM contestations WHERE avis_id = ?', args: [a.id] });
-      await db.execute({ sql: 'DELETE FROM verifications WHERE avis_id = ?', args: [a.id] });
-      await db.execute({ sql: 'DELETE FROM transactions WHERE avis_id = ?', args: [a.id] });
-      await db.execute({ sql: 'DELETE FROM avis WHERE id = ?', args: [a.id] });
-      count++;
-    }
-    res.json({ success: true, message: `${count} avis supprimés !` });
-  } catch (e) {
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-router.delete('/avis/menage', async (req, res) => {
-  try {
-    // Remettre en disponible les avis refusés
+    // 1. Remettre en disponible les avis refusés
     const refusesRes = await db.execute({
       sql: "SELECT id FROM avis WHERE statut = 'refuse'",
       args: [],
@@ -215,7 +196,7 @@ router.delete('/avis/menage', async (req, res) => {
       resetCount++;
     }
 
-    // Supprimer les avis payés
+    // 2. Supprimer les avis payés
     const payesRes = await db.execute({
       sql: "SELECT id FROM avis WHERE statut = 'paye'",
       args: [],
@@ -237,6 +218,20 @@ router.delete('/avis/menage', async (req, res) => {
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
+
+router.delete('/avis/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    await db.execute({ sql: 'DELETE FROM contestations WHERE avis_id = ?', args: [id] });
+    await db.execute({ sql: 'DELETE FROM verifications WHERE avis_id = ?', args: [id] });
+    await db.execute({ sql: 'DELETE FROM transactions WHERE avis_id = ?', args: [id] });
+    await db.execute({ sql: 'DELETE FROM avis WHERE id = ?', args: [id] });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 router.put('/avis/:id', async (req, res) => {
   try {
     const { lien_maps, texte, prix, delai_paiement, statut } = req.body;
@@ -327,18 +322,15 @@ router.put('/avis/:id/remettre-dispo', async (req, res) => {
   }
 });
 
-// PUT /api/admin/avis/:id/prioritaire
 router.put('/avis/:id/prioritaire', async (req, res) => {
   try {
     const { prioritaire, prix_membre } = req.body;
     const m = parseFloat(prix_membre);
     if (isNaN(m) || m < 1) return res.status(400).json({ error: 'Prix minimum 1€' });
-
     await db.execute({
       sql: 'UPDATE avis SET prioritaire = ?, prix_membre = ? WHERE id = ?',
       args: [prioritaire ? 1 : 0, m, req.params.id],
     });
-
     if (prioritaire) {
       const membresRes = await db.execute({
         sql: "SELECT id FROM users WHERE role = 'membre' AND banned = 0",
@@ -351,7 +343,6 @@ router.put('/avis/:id/prioritaire', async (req, res) => {
         });
       }
     }
-
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: 'Erreur serveur' });
@@ -385,12 +376,10 @@ router.post('/avis/:id/verifier', async (req, res) => {
               args: [avis.id, avis.reserve_par],
             });
           }
-
           if (result.erreur) {
             console.log(`⚠️ Vérif manuelle avis #${avis.id} : erreur API — ${result.raison}`);
             return;
           }
-
           if (!result.trouve) {
             await db.execute({
               sql: "UPDATE avis SET statut = 'refuse' WHERE id = ?",

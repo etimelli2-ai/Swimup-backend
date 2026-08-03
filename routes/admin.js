@@ -162,18 +162,25 @@ router.get('/avis', async (req, res) => {
 
 router.post('/avis', async (req, res) => {
   try {
-    const { client_id, lien_maps, texte, prix, delai_paiement } = req.body;
-    if (!lien_maps || !texte || !prix || !client_id) return res.status(400).json({ error: 'Champs requis manquants' });
+    const { client_id, lien_maps, texte, prix, delai_paiement, nb_etoiles, nom_etablissement } = req.body;
+    if (!lien_maps || !texte || !client_id) return res.status(400).json({ error: 'Champs requis manquants' });
     await db.execute({
-      sql: 'INSERT INTO avis (client_id, lien_maps, texte, prix, delai_paiement) VALUES (?,?,?,?,?)',
-      args: [client_id, lien_maps, texte, parseFloat(prix), parseInt(delai_paiement) || 30],
+      sql: `INSERT INTO avis (client_id, lien_maps, texte, prix, prix_membre, delai_paiement, nb_etoiles, nom_etablissement, statut)
+            VALUES (?,?,?,?,?,?,?,?,'disponible')`,
+      args: [
+        client_id, lien_maps, texte,
+        parseFloat(prix) || 3,
+        1.00,
+        parseInt(delai_paiement) || 30,
+        parseInt(nb_etoiles) || 5,
+        nom_etablissement || null,
+      ],
     });
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
-
 // Fix — une seule route menage qui fait les deux actions
 router.delete('/avis/menage', async (req, res) => {
   try {

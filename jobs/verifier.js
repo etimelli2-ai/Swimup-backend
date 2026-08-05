@@ -45,6 +45,16 @@ async function resoudreLienCourt(lien) {
 // Extraire la meilleure query pour Outscraper
 function extraireQueryPourOutscraper(url) {
   try {
+    // Cas 1 — lien direct vers un avis /maps/reviews/data=...
+    // Extraire le place ID depuis !1s0x...
+    const placeIdMatch = url.match(/!1s(0x[^!:]+:[^!&]+)/)
+    if (placeIdMatch) {
+      const placeId = decodeURIComponent(placeIdMatch[1])
+      console.log(`📍 Place ID extrait depuis reviews: ${placeId}`)
+      return placeId
+    }
+
+    // Cas 2 — /place/NomLieu/
     const placeMatch = url.match(/\/place\/([^/@?&]+)/)
     if (placeMatch) {
       const nom = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '))
@@ -52,6 +62,7 @@ function extraireQueryPourOutscraper(url) {
       return nom
     }
 
+    // Cas 3 — ?q=NomEtablissement,Adresse,Ville (format GPS)
     const qMatch = url.match(/[?&]q=([^&]+)/)
     if (qMatch) {
       const q = decodeURIComponent(qMatch[1].replace(/\+/g, ' '))
@@ -63,9 +74,12 @@ function extraireQueryPourOutscraper(url) {
         console.log(`📍 Extrait depuis ?q=: ${query}`)
         return query
       }
+      console.log(`📍 Extrait depuis ?q= (simple): ${q}`)
       return q
     }
 
+    // Cas 4 — URL complète comme fallback
+    console.log(`📍 Fallback URL complète`)
     return url
   } catch {
     return url
@@ -102,7 +116,10 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
       return { trouve: false, erreur: true, raison: 'API non configurée' }
     }
 
+    // Étape 1 — résoudre les liens courts
     const lienResolu = await resoudreLienCourt(lienMaps)
+
+    // Étape 2 — extraire la meilleure query pour Outscraper
     const query = extraireQueryPourOutscraper(lienResolu)
     console.log(`📍 Query finale Outscraper: ${query}`)
 

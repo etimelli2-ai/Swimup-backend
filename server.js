@@ -37,6 +37,40 @@ app.get('/api/debug-stripe2', async (req, res) => {
     res.json({ error: e.message });
   }
 });
+app.get('/api/migrate8', async (req, res) => {
+  try {
+    await db.executeMultiple(`
+      CREATE TABLE IF NOT EXISTS boutique_produits (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        nom         TEXT NOT NULL,
+        description TEXT,
+        prix        REAL NOT NULL,
+        stock       INTEGER DEFAULT -1,
+        image_url   TEXT,
+        actif       INTEGER DEFAULT 1,
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS boutique_commandes (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL,
+        produit_id  INTEGER NOT NULL,
+        quantite    INTEGER DEFAULT 1,
+        montant     REAL NOT NULL,
+        statut      TEXT DEFAULT 'en_attente',
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (produit_id) REFERENCES boutique_produits(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_boutique_commandes_user ON boutique_commandes(user_id);
+      CREATE INDEX IF NOT EXISTS idx_boutique_commandes_statut ON boutique_commandes(statut);
+    `);
+    res.json({ success: true, message: 'Migration 8 OK' });
+  } catch (e) {
+    res.json({ success: false, message: e.message });
+  }
+});
 
 // Lancer la vérification manuellement
 app.post('/api/admin/run-verif', authMiddleware, adminOnly, async (req, res) => {

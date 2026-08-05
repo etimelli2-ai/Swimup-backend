@@ -21,6 +21,7 @@ app.use('/api/client',    require('./routes/client'));
 app.use('/api/loterie',   require('./routes/loterie'));
 app.use('/api/stripe',    require('./routes/stripe'));
 app.use('/api/public',    require('./routes/public'));
+app.use('/api/boutique',  require('./routes/boutique'));
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', time: new Date() }));
 
@@ -37,6 +38,7 @@ app.get('/api/debug-stripe2', async (req, res) => {
     res.json({ error: e.message });
   }
 });
+
 app.get('/api/migrate8', async (req, res) => {
   try {
     await db.executeMultiple(`
@@ -50,7 +52,6 @@ app.get('/api/migrate8', async (req, res) => {
         actif       INTEGER DEFAULT 1,
         created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
       );
-
       CREATE TABLE IF NOT EXISTS boutique_commandes (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id     INTEGER NOT NULL,
@@ -62,7 +63,6 @@ app.get('/api/migrate8', async (req, res) => {
         FOREIGN KEY (user_id) REFERENCES users(id),
         FOREIGN KEY (produit_id) REFERENCES boutique_produits(id)
       );
-
       CREATE INDEX IF NOT EXISTS idx_boutique_commandes_user ON boutique_commandes(user_id);
       CREATE INDEX IF NOT EXISTS idx_boutique_commandes_statut ON boutique_commandes(statut);
     `);

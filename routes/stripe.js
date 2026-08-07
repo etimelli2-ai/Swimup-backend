@@ -62,19 +62,14 @@ function verifyStripeWebhook(payload, sig, secret) {
 // POST /api/stripe/public-checkout — SANS auth
 router.post('/public-checkout', async (req, res) => {
   try {
-    const {
-      email, lien_maps, nom_etablissement, type_etablissement,
-      texte_avis, nb_etoiles, ton, quantite
-    } = req.body;
+    const { email, lien_maps, nom_etablissement, type_etablissement, texte_avis, nb_etoiles, ton, quantite } = req.body;
 
     if (!email || !lien_maps) return res.status(400).json({ error: 'Email et lien Maps requis' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Email invalide' });
 
     const nb = parseInt(quantite) || 1;
-    if (nb < 1) return res.status(400).json({ error: 'Minimum 1 avis' });
-
-    const token = crypto.randomUUID();
     const montant = nb * PRIX_PUBLIC;
+    const token = crypto.randomUUID();
 
     const sessionData = buildFormData({
       payment_method_types: ['card'],
@@ -111,16 +106,106 @@ router.post('/public-checkout', async (req, res) => {
               (email, token_suivi, stripe_session_id, montant, nb_avis, lien_maps,
                nom_etablissement, type_etablissement, texte_avis, nb_etoiles, ton)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        email, token, session.id, montant, nb, lien_maps,
+      args: [email, token, session.id, montant, nb, lien_maps,
         nom_etablissement || null, type_etablissement || null,
-        texte_avis || null, nb_etoiles || 5, ton || 'naturel',
-      ],
+        texte_avis || null, nb_etoiles || 5, ton || 'naturel'],
     });
 
     res.json({ url: session.url, token });
   } catch (e) {
     console.error('Stripe public error:', e.response?.data || e.message);
+    res.status(500).json({ error: e.response?.data?.error?.message || e.message });
+  }
+});
+
+// POST /api/stripe/boutique-checkout
+router.post('/boutique-checkout', authMiddleware, async (req, res) => {
+  try {
+    const { produit_id, quantite } = req.body;
+    const qty = parseInt(quantite) || 1;
+
+    const produitRes = await db.execute({
+      sql: 'SELECT * FROM boutique_produits WHERE id = ? AND actif = 1',
+      args: [produit_id],
+    });
+    const produit = produitRes.rows[0];
+    if (!produit) return res.status(404).json({ error: 'Produit introuvable' });
+
+    if (produit.stock !== -1 && produit.stock < qty) {
+      return res.status(400).json({ error: 'Stock insuffisant' });
+    }
+
+    const montant = produit.prix * qty;
+
+    const sessionData = buildFormData({
+      payment_method_types: ['card'],
+      mode: 'payment',
+      success_url: `${process.env.FRONTEND_URL}/boutique?success=1`,
+      cancel_url: `${process.env.FRONTEND_URL}/boutique?cancel=1`,
+      'line_items[0][price_data][currency]': 'eur',
+      'line_items[0][price_data][unit_amount]': Math.round(montant * 100),
+      'line_items[0][price_data][product_data][name]': `${produit.nom} x${qty}`,
+      'line_items[0][price_data][product_data][description]': produit.description || '',
+      'line_items[0][quantity]': 1,
+      'metadata[order_type]': 'boutique',
+      'metadata[user_id]': String(req.user.id),
+      'metadata[produit_id]': String(produit_id),
+      'metadata[quantite]': String(qty),
+      'metadata[montant]': String(montant),
+    });
+
+    const response = await axios.post(`${STRIPE_API}/checkout/sessions`, sessionData, {
+      headers: stripeHeaders,
+      timeout: 30000,
+    });
+
+    res.json({ url: response.data.url });
+  } catch (e) {
+    console.error('Stripe boutique error:', e.response?.data || e.message);
+    res.status(500).json({ error: e.response?.data?.error?.message || e.message });
+  }
+});
+
+// POST /api/stripe/loterie-checkout
+router.post('/loterie-checkout', authMiddleware, async (req, res) => {
+  try {
+    const { loterie_id, nb_tickets } = req.body;
+    const nb = parseInt(nb_tickets) || 1;
+
+    const loterieRes = await db.execute({
+      sql: "SELECT * FROM loteries WHERE id = ? AND statut = 'en_cours'",
+      args: [loterie_id],
+    });
+    const loterie = loterieRes.rows[0];
+    if (!loterie) return res.status(404).json({ error: 'Loterie introuvable' });
+
+    const montant = loterie.prix_ticket * nb;
+
+    const sessionData = buildFormData({
+      payment_method_types: ['card'],
+      mode: 'payment',
+      success_url: `${process.env.FRONTEND_URL}/loterie?success=1`,
+      cancel_url: `${process.env.FRONTEND_URL}/loterie?cancel=1`,
+      'line_items[0][price_data][currency]': 'eur',
+      'line_items[0][price_data][unit_amount]': Math.round(montant * 100),
+      'line_items[0][price_data][product_data][name]': `${nb} ticket${nb > 1 ? 's' : ''} — Loterie SwimUp`,
+      'line_items[0][price_data][product_data][description]': `${loterie.titre} — Gain : ${loterie.montant_gain}€`,
+      'line_items[0][quantity]': 1,
+      'metadata[order_type]': 'loterie',
+      'metadata[user_id]': String(req.user.id),
+      'metadata[loterie_id]': String(loterie_id),
+      'metadata[nb_tickets]': String(nb),
+      'metadata[montant]': String(montant),
+    });
+
+    const response = await axios.post(`${STRIPE_API}/checkout/sessions`, sessionData, {
+      headers: stripeHeaders,
+      timeout: 30000,
+    });
+
+    res.json({ url: response.data.url });
+  } catch (e) {
+    console.error('Stripe loterie error:', e.response?.data || e.message);
     res.status(500).json({ error: e.response?.data?.error?.message || e.message });
   }
 });
@@ -133,7 +218,7 @@ router.post('/create-checkout-session', authMiddleware, async (req, res) => {
     if (!nb_avis || nb_avis < 1) return res.status(400).json({ error: 'Nombre d\'avis invalide' });
     if (!lien_maps) return res.status(400).json({ error: 'Lien Google Maps requis' });
 
-    // Admin — bypass Stripe, créer les avis directement
+    // Admin — bypass Stripe
     if (req.user.role === 'admin') {
       const clientRes = await db.execute({
         sql: 'SELECT id FROM clients WHERE user_id = ?',
@@ -172,6 +257,7 @@ router.post('/create-checkout-session', authMiddleware, async (req, res) => {
     });
     const client = clientRes.rows[0];
     if (!client) return res.status(404).json({ error: 'Profil client introuvable' });
+
     const montant = nb_avis * PRIX_AVIS;
 
     const sessionData = buildFormData({
@@ -250,7 +336,6 @@ router.post('/webhook', async (req, res) => {
         const orderId = orderRes.rows[0]?.id;
         const nbAvis = parseInt(meta.quantite) || 1;
 
-        // Créer autant d'avis publics que commandés
         for (let i = 0; i < nbAvis; i++) {
           await db.execute({
             sql: 'INSERT INTO avis_publics (public_order_id) VALUES (?)',
@@ -262,7 +347,81 @@ router.post('/webhook', async (req, res) => {
       } catch (e) {
         console.error('Erreur webhook public:', e.message);
       }
+      return res.json({ received: true });
+    }
 
+    // Commande boutique
+    if (meta.order_type === 'boutique') {
+      try {
+        const userId    = parseInt(meta.user_id);
+        const produitId = parseInt(meta.produit_id);
+        const qty       = parseInt(meta.quantite) || 1;
+        const montant   = parseFloat(meta.montant);
+
+        const produitRes = await db.execute({
+          sql: 'SELECT * FROM boutique_produits WHERE id = ?',
+          args: [produitId],
+        });
+        const produit = produitRes.rows[0];
+
+        await db.execute({
+          sql: `INSERT INTO boutique_commandes (user_id, produit_id, quantite, montant, statut)
+                VALUES (?, ?, ?, ?, 'en_attente')`,
+          args: [userId, produitId, qty, montant],
+        });
+
+        if (produit && produit.stock !== -1) {
+          await db.execute({
+            sql: 'UPDATE boutique_produits SET stock = stock - ? WHERE id = ?',
+            args: [qty, produitId],
+          });
+        }
+
+        await db.execute({
+          sql: 'INSERT INTO notifications (user_id, titre, message) VALUES (?,?,?)',
+          args: [userId, '🛍️ Commande confirmée !', `Ta commande de ${produit?.nom || 'produit'} x${qty} a été payée avec succès !`],
+        });
+
+        console.log(`✅ Commande boutique Stripe — user #${userId}, produit #${produitId} x${qty}`);
+      } catch (e) {
+        console.error('Erreur webhook boutique:', e.message);
+      }
+      return res.json({ received: true });
+    }
+
+    // Commande loterie
+    if (meta.order_type === 'loterie') {
+      try {
+        const userId    = parseInt(meta.user_id);
+        const loterieId = parseInt(meta.loterie_id);
+        const nbTickets = parseInt(meta.nb_tickets) || 1;
+
+        const existing = await db.execute({
+          sql: 'SELECT * FROM loterie_tickets WHERE loterie_id = ? AND user_id = ?',
+          args: [loterieId, userId],
+        });
+
+        if (existing.rows.length) {
+          await db.execute({
+            sql: 'UPDATE loterie_tickets SET nb_tickets = nb_tickets + ? WHERE loterie_id = ? AND user_id = ?',
+            args: [nbTickets, loterieId, userId],
+          });
+        } else {
+          await db.execute({
+            sql: 'INSERT INTO loterie_tickets (loterie_id, user_id, nb_tickets) VALUES (?, ?, ?)',
+            args: [loterieId, userId, nbTickets],
+          });
+        }
+
+        await db.execute({
+          sql: 'INSERT INTO notifications (user_id, titre, message) VALUES (?,?,?)',
+          args: [userId, '🎟️ Tickets achetés !', `${nbTickets} ticket${nbTickets > 1 ? 's' : ''} ajouté${nbTickets > 1 ? 's' : ''} à la loterie !`],
+        });
+
+        console.log(`✅ Loterie Stripe — user #${userId}, ${nbTickets} tickets`);
+      } catch (e) {
+        console.error('Erreur webhook loterie:', e.message);
+      }
       return res.json({ received: true });
     }
 

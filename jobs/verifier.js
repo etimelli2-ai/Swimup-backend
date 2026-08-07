@@ -30,9 +30,9 @@ function similarite(texte1, texte2) {
 
 function seuilSimilarite(texte) {
   const mots = normaliser(texte).split(' ').filter(m => m.length > 2)
-  if (mots.length < 10) return 0.55
-  if (mots.length < 20) return 0.65
-  return 0.72
+  if (mots.length < 10) return 0.40
+  if (mots.length < 20) return 0.45
+  return 0.50
 }
 
 async function resoudreLienCourt(lien) {

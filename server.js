@@ -82,7 +82,7 @@ app.post('/api/admin/run-verif', authMiddleware, adminOnly, async (req, res) => 
   }
 });
 
-cron.schedule('0 8 * * *', jobVerificationQuotidienne, { timezone: 'Europe/Paris' });
+cron.schedule('0 8 * * 1', jobVerificationQuotidienne, { timezone: 'Europe/Paris' })
 
 const PORT = process.env.PORT || 3001;
 

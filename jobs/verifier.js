@@ -143,7 +143,7 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
     const response = await axios.get('https://api.app.outscraper.com/maps/reviews-v3', {
       params: {
         query:        query,
-        reviewsLimit: 100,  // Augmenté de 50 à 100
+        reviewsLimit: 40,  // Augmenté de 50 à 100
         language:     'fr',
         sort:         'newest',
         async:        true,
@@ -244,7 +244,8 @@ async function jobVerificationQuotidienne() {
               a.prix, a.client_id, a.valide_at, a.reserve_at, a.delai_paiement
             FROM verifications v
             JOIN avis a ON v.avis_id = a.id
-            WHERE v.statut = 'actif' AND a.statut = 'valide'`,
+            WHERE v.statut = 'actif' AND a.statut = 'valide'
+            AND a.reserve_at >= datetime('now', '-35 days')
       args: [],
     })
 

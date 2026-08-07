@@ -16,33 +16,25 @@ function similarite(texte1, texte2) {
   const t1 = normaliser(texte1)
   const t2 = normaliser(texte2)
   if (t1 === t2) return 1
-
   const mots1 = t1.split(' ').filter(m => m.length > 2)
   const mots2 = new Set(t2.split(' ').filter(m => m.length > 2))
   if (mots1.length === 0) return 0
-
   const communs = mots1.filter(m => mots2.has(m))
   const scoreA = communs.length / mots1.length
-
-  // Score inverse — combien de mots du texte2 sont dans texte1
   const mots2Arr = [...mots2]
   const mots1Set = new Set(mots1)
   const communsB = mots2Arr.filter(m => mots1Set.has(m))
   const scoreB = mots2Arr.length > 0 ? communsB.length / mots2Arr.length : 0
-
-  // Prendre le meilleur des deux scores
   return Math.max(scoreA, scoreB)
 }
 
-// Seuil adaptatif selon la longueur du texte
 function seuilSimilarite(texte) {
   const mots = normaliser(texte).split(' ').filter(m => m.length > 2)
-  if (mots.length < 10) return 0.55 // Texte court — seuil plus bas
-  if (mots.length < 20) return 0.65 // Texte moyen
-  return 0.72                        // Texte long — seuil plus élevé
+  if (mots.length < 10) return 0.55
+  if (mots.length < 20) return 0.65
+  return 0.72
 }
 
-// Résoudre les liens courts Google Maps
 async function resoudreLienCourt(lien) {
   if (!lien.includes('goo.gl') && !lien.includes('maps.app.goo.gl')) return lien
   return new Promise((resolve) => {
@@ -61,19 +53,9 @@ async function resoudreLienCourt(lien) {
   })
 }
 
-// Extraire la meilleure query pour Outscraper
 function extraireQueryPourOutscraper(url) {
   try {
-    // Cas 1 — lien direct vers un avis /maps/reviews/data=...
-    // Extraire le place ID depuis !1s0x...
-    const placeIdMatch = url.match(/!1s(0x[^!:]+:[^!&]+)/)
-    if (placeIdMatch) {
-      const placeId = decodeURIComponent(placeIdMatch[1])
-      console.log(`📍 Place ID extrait depuis reviews: ${placeId}`)
-      return placeId
-    }
-
-    // Cas 2 — /place/NomLieu/
+    // Cas 1 — /place/NomLieu/ (priorité maximale)
     const placeMatch = url.match(/\/place\/([^/@?&]+)/)
     if (placeMatch) {
       const nom = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '))
@@ -81,7 +63,7 @@ function extraireQueryPourOutscraper(url) {
       return nom
     }
 
-    // Cas 3 — ?q=NomEtablissement,Adresse,Ville (format GPS)
+    // Cas 2 — ?q=NomEtablissement
     const qMatch = url.match(/[?&]q=([^&]+)/)
     if (qMatch) {
       const q = decodeURIComponent(qMatch[1].replace(/\+/g, ' '))
@@ -94,6 +76,14 @@ function extraireQueryPourOutscraper(url) {
         return query
       }
       return q
+    }
+
+    // Cas 3 — Place ID en dernier recours
+    const placeIdMatch = url.match(/!1s(0x[^!:]+:[^!&]+)/)
+    if (placeIdMatch) {
+      const placeId = decodeURIComponent(placeIdMatch[1])
+      console.log(`📍 Place ID extrait: ${placeId}`)
+      return placeId
     }
 
     console.log(`📍 Fallback URL complète`)
@@ -133,17 +123,14 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
       return { trouve: false, erreur: true, raison: 'API non configurée' }
     }
 
-    // Étape 1 — résoudre les liens courts
     const lienResolu = await resoudreLienCourt(lienMaps)
-
-    // Étape 2 — extraire la meilleure query pour Outscraper
     const query = extraireQueryPourOutscraper(lienResolu)
     console.log(`📍 Query finale Outscraper: ${query}`)
 
     const response = await axios.get('https://api.app.outscraper.com/maps/reviews-v3', {
       params: {
         query:        query,
-        reviewsLimit: 40,  // Augmenté de 50 à 100
+        reviewsLimit: 40,
         language:     'fr',
         sort:         'newest',
         async:        true,
@@ -175,9 +162,8 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
       return { trouve: false, erreur: false, raison: 'Aucun avis retourné par Outscraper' }
     }
 
-    // Calculer le seuil adaptatif selon la longueur du texte attendu
     const seuil = seuilSimilarite(texteAttendu)
-    console.log(`📊 Seuil de similarité adaptatif : ${(seuil * 100).toFixed(0)}%`)
+    console.log(`📊 Seuil adaptatif : ${(seuil * 100).toFixed(0)}%`)
 
     let meilleurScore = 0
     let meilleurAvis = null
@@ -245,7 +231,7 @@ async function jobVerificationQuotidienne() {
             FROM verifications v
             JOIN avis a ON v.avis_id = a.id
             WHERE v.statut = 'actif' AND a.statut = 'valide'
-            AND a.reserve_at >= datetime('now', '-35 days')
+            AND a.reserve_at >= datetime('now', '-35 days')`,
       args: [],
     })
 
@@ -267,7 +253,7 @@ async function jobVerificationQuotidienne() {
         })
 
         if (result.erreur) {
-          console.log(`⚠️ Avis #${verif.avis_id} : erreur API — ${result.raison} (on retente demain)`)
+          console.log(`⚠️ Avis #${verif.avis_id} : erreur API — ${result.raison} (on retente la semaine prochaine)`)
           continue
         }
 
@@ -310,11 +296,10 @@ async function jobVerificationQuotidienne() {
 
         console.log(`✅ Avis #${verif.avis_id} trouvé : ${result.raison}`)
 
-        // Fix — utiliser reserve_at au lieu de valide_at
         const dateRef = verif.reserve_at ? new Date(verif.reserve_at) : new Date(verif.valide_at)
         const joursEcoules = (Date.now() - dateRef.getTime()) / (1000 * 60 * 60 * 24)
 
-        console.log(`📅 Jours écoulés depuis réservation : ${joursEcoules.toFixed(1)}j / ${verif.delai_paiement}j requis`)
+        console.log(`📅 Jours écoulés : ${joursEcoules.toFixed(1)}j / ${verif.delai_paiement}j requis`)
 
         if (joursEcoules >= verif.delai_paiement) {
           const dejaCredite = await db.execute({
@@ -351,16 +336,15 @@ async function jobVerificationQuotidienne() {
       }
     }
 
-    // Libérer les réservations expirées
     await db.execute({
       sql: `UPDATE avis SET statut = 'disponible', reserve_par = NULL, reserve_at = NULL
             WHERE statut = 'reserve' AND reserve_at <= datetime('now', '-1 hour', 'utc')`,
       args: [],
     })
 
-    console.log('✅ Vérification quotidienne terminée')
+    console.log('✅ Vérification hebdomadaire terminée')
   } catch (e) {
-    console.error('Erreur job quotidien:', e)
+    console.error('Erreur job:', e)
   }
 }
 

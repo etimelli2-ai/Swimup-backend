@@ -16,11 +16,30 @@ function similarite(texte1, texte2) {
   const t1 = normaliser(texte1)
   const t2 = normaliser(texte2)
   if (t1 === t2) return 1
+
   const mots1 = t1.split(' ').filter(m => m.length > 2)
   const mots2 = new Set(t2.split(' ').filter(m => m.length > 2))
   if (mots1.length === 0) return 0
+
   const communs = mots1.filter(m => mots2.has(m))
-  return communs.length / mots1.length
+  const scoreA = communs.length / mots1.length
+
+  // Score inverse — combien de mots du texte2 sont dans texte1
+  const mots2Arr = [...mots2]
+  const mots1Set = new Set(mots1)
+  const communsB = mots2Arr.filter(m => mots1Set.has(m))
+  const scoreB = mots2Arr.length > 0 ? communsB.length / mots2Arr.length : 0
+
+  // Prendre le meilleur des deux scores
+  return Math.max(scoreA, scoreB)
+}
+
+// Seuil adaptatif selon la longueur du texte
+function seuilSimilarite(texte) {
+  const mots = normaliser(texte).split(' ').filter(m => m.length > 2)
+  if (mots.length < 10) return 0.55 // Texte court — seuil plus bas
+  if (mots.length < 20) return 0.65 // Texte moyen
+  return 0.72                        // Texte long — seuil plus élevé
 }
 
 // Résoudre les liens courts Google Maps
@@ -74,11 +93,9 @@ function extraireQueryPourOutscraper(url) {
         console.log(`📍 Extrait depuis ?q=: ${query}`)
         return query
       }
-      console.log(`📍 Extrait depuis ?q= (simple): ${q}`)
       return q
     }
 
-    // Cas 4 — URL complète comme fallback
     console.log(`📍 Fallback URL complète`)
     return url
   } catch {
@@ -125,11 +142,11 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
 
     const response = await axios.get('https://api.app.outscraper.com/maps/reviews-v3', {
       params: {
-        query: query,
-        reviewsLimit: 50,
-        language: 'fr',
-        sort: 'newest',
-        async: true,
+        query:        query,
+        reviewsLimit: 100,  // Augmenté de 50 à 100
+        language:     'fr',
+        sort:         'newest',
+        async:        true,
       },
       headers: { 'X-API-KEY': apiKey },
       timeout: 30000,
@@ -158,6 +175,10 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
       return { trouve: false, erreur: false, raison: 'Aucun avis retourné par Outscraper' }
     }
 
+    // Calculer le seuil adaptatif selon la longueur du texte attendu
+    const seuil = seuilSimilarite(texteAttendu)
+    console.log(`📊 Seuil de similarité adaptatif : ${(seuil * 100).toFixed(0)}%`)
+
     let meilleurScore = 0
     let meilleurAvis = null
 
@@ -171,9 +192,9 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
       }
     }
 
-    console.log(`📊 Meilleur score : ${(meilleurScore * 100).toFixed(0)}%`)
+    console.log(`📊 Meilleur score : ${(meilleurScore * 100).toFixed(0)}% (seuil: ${(seuil * 100).toFixed(0)}%)`)
 
-    if (meilleurScore >= 0.75) {
+    if (meilleurScore >= seuil) {
       if (nbEtoilesAttendu && meilleurAvis?.review_rating) {
         if (parseInt(meilleurAvis.review_rating) !== parseInt(nbEtoilesAttendu)) {
           return {
@@ -193,7 +214,7 @@ async function verifierViaOutscraper(lienMaps, texteAttendu, nbEtoilesAttendu) {
     return {
       trouve: false,
       erreur: false,
-      raison: `Avis non trouvé parmi ${reviews.length} avis (score max: ${(meilleurScore * 100).toFixed(0)}%)`,
+      raison: `Avis non trouvé parmi ${reviews.length} avis (score max: ${(meilleurScore * 100).toFixed(0)}%, seuil: ${(seuil * 100).toFixed(0)}%)`,
     }
   } catch (e) {
     console.error('Erreur Outscraper:', e.message)
@@ -288,7 +309,7 @@ async function jobVerificationQuotidienne() {
 
         console.log(`✅ Avis #${verif.avis_id} trouvé : ${result.raison}`)
 
-        // Fix — utiliser reserve_at au lieu de valide_at pour calculer les 30 jours
+        // Fix — utiliser reserve_at au lieu de valide_at
         const dateRef = verif.reserve_at ? new Date(verif.reserve_at) : new Date(verif.valide_at)
         const joursEcoules = (Date.now() - dateRef.getTime()) / (1000 * 60 * 60 * 24)
 

@@ -72,6 +72,18 @@ app.get('/api/migrate8', async (req, res) => {
   }
 });
 
+app.get('/api/migrate9', async (req, res) => {
+  try {
+    await db.executeMultiple(`
+      ALTER TABLE boutique_commandes ADD COLUMN instructions TEXT;
+      ALTER TABLE boutique_commandes ADD COLUMN code TEXT;
+    `);
+    res.json({ success: true, message: 'Migration 9 OK' });
+  } catch (e) {
+    res.json({ success: false, message: e.message });
+  }
+});
+
 // Lancer la vérification manuellement
 app.post('/api/admin/run-verif', authMiddleware, adminOnly, async (req, res) => {
   try {
